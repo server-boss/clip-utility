@@ -18,7 +18,7 @@ Includes an interactive TUI (`clip-tui`) with live preview, and a macOS dialog i
 
 ![clip-tui](assets/tui.png)
 
-### Result pasted into Apple Notes
+### Result pasted into Typora
 
 ![Rich paste result](assets/rich-paste.png)
 
