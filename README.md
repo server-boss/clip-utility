@@ -17,15 +17,20 @@ Use the interactive TUI with live preview — select transforms and see the resu
 
 `clip-tui`
 
-![clip-tui](assets/tui.png)
-![Result pasted into Markdown Editor](assets/rich-paste.png)
+<p>
+<img src="assets/tui.png" width="49%" alt="clip-tui">
+<img src="assets/rich-paste.png" width="49%" alt="Result pasted into Markdown Editor">
+</p>
 
 Or open a native MacOS pop-up from the terminal or with a simple Apple "Shortcut", that you can bind to a keyboard/mouse shortcut and add to your menu bar:
 
 `clip-menu`
 
-![Main menu](assets/menu-main.png) 
-![Format options](assets/menu-format.png)
+<p>
+<img src="assets/menu-main.png" width="49%" alt="Main menu">
+<img src="assets/menu-format.png" width="49%" alt="Format options">
+</p>
+
 ![Shortcut setup](assets/shortcut-setup.png)
 
 Or use the CLI directly, to add arguments in order that they will be applied:
@@ -56,8 +61,10 @@ Create a new shortcut in Shortcuts.app with a "Run Shell Script" action.
 Set the script to the path of `clip-menu`, shell to `bash`, and input to "Clipboard". 
 Assign a keyboard shortcut (e.g. `Option+Shift+C`) under the shortcut's details (i).
 
-![Shortcut setup](assets/shortcut-setup.png)
-![Shortcut privacy](assets/shortcut-privacy.png)
+<p>
+<img src="assets/shortcut-setup.png" width="49%" alt="Shortcut setup">
+<img src="assets/shortcut-privacy.png" width="49%" alt="Shortcut privacy">
+</p>
 
 ## Full Clip CLI Argument List
 
