@@ -116,7 +116,9 @@ if [ -f "$selections_file" ]; then
 fi
 
 if [ -z "$flags" ]; then
-  echo "── Clipboard contents (raw) ──"
+  d='\033[38;5;240m'
+  r='\033[0m'
+  echo -e "  ${d}── Clipboard contents (raw) ──${r}"
   echo ""
   pbpaste | head -50
 else
@@ -178,12 +180,15 @@ selected=$(echo "$items" | fzf \
   --reverse \
   --height=100% \
   --border=rounded \
-  --border-label=" clip — clipboard transformer " \
+  --border-label=" ✂ " \
   --border-label-pos=3 \
-  --header="Tab: toggle  Enter: apply  Ctrl-C: cancel" \
+  --header="$(printf '\033[38;5;129m ██████╗\033[38;5;135m██╗     \033[38;5;171m██╗\033[38;5;209m██████╗ \033[0m\n\033[38;5;129m██╔════╝\033[38;5;135m██║     \033[38;5;171m██║\033[38;5;209m██╔══██╗\033[0m\n\033[38;5;135m██║     \033[38;5;171m██║     \033[38;5;171m██║\033[38;5;209m██████╔╝\033[0m\n\033[38;5;171m██║     \033[38;5;207m██║     \033[38;5;209m██║\033[38;5;215m██╔═══╝ \033[0m\n\033[38;5;207m╚██████╗\033[38;5;209m███████╗\033[38;5;215m██║\033[38;5;221m██║     \033[0m\n\033[38;5;209m ╚═════╝\033[38;5;215m╚══════╝\033[38;5;221m╚═╝\033[38;5;221m╚═╝     \033[0m\n\033[38;5;240m ✂ clipboard transformer\033[0m\n\n Tab: toggle  Enter: apply  Ctrl-C: cancel\n Del: clear   R: refresh')" \
   --header-first \
   --preview="$PREVIEW_SCRIPT {+f}" \
   --preview-window=right:55%:wrap \
+  --ansi \
+  --bind "del:execute-silent(pbcopy < /dev/null)+reload(echo \"$items\")+clear-selection" \
+  --bind "r:execute-silent(pbpaste > $CLIP_TMP)+refresh-preview" \
   --color='border:#8b5cf6,label:#8b5cf6,header:#6b7280' \
   --prompt="transforms> " \
   --marker="✓" \
