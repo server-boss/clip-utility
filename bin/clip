@@ -62,7 +62,7 @@ clipboard_write() {
         return 1
       fi
       ;;
-    wsl)     powershell.exe -NoProfile -Command "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value (\$input -join \\\"`n\\\")" ;;
+    wsl)     powershell.exe -NoProfile -Command 'Set-Clipboard -Value ($input -join [char]10)' ;;
     *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
   esac
 }
