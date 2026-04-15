@@ -3,7 +3,7 @@
 # Installs CLI tools and optional Clip Menu.app
 
 INSTALL_DIR="/usr/local/bin"
-SRC_DIR="$(dirname "$0")/../Resources"
+SRC_DIR="/tmp/clip-utility-install/Resources"
 
 mkdir -p "$INSTALL_DIR"
 
