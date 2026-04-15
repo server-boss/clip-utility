@@ -53,31 +53,27 @@ label_to_flags() {
     "Flatten text"*)                      echo "--trim --unformat --unwrap --collapse" ;;
     # Clipboard Source
     "--claude"*)                          echo "--claude" ;;
-    "--md"*)                              echo "--md" ;;
+    "--md2csv"*)                          echo "--md2csv" ;;
+    "--md2html"*)                         echo "--md2html" ;;
+    "--md "*)                             echo "--md" ;;
     "--boxtable"*)                        echo "--boxtable" ;;
     "--unwrap"*)                          echo "--unwrap" ;;
-    # Formatting
+    "--strip-blank"*)                     echo "--strip-blank" ;;
     "--trim"*)                            echo "--trim" ;;
     "--rtrim"*)                           echo "--rtrim" ;;
-    "--strip-blank"*)                     echo "--strip-blank" ;;
     "--collapse"*)                        echo "--collapse" ;;
     "--dedup"*)                           echo "--dedup" ;;
     "--unformat"*)                        echo "--unformat" ;;
-    # Case
     "--lower"*)                           echo "--lower" ;;
     "--upper"*)                           echo "--upper" ;;
     "--title"*)                           echo "--title" ;;
     "--sentence"*)                        echo "--sentence" ;;
-    # Sort
     "--sort-r"*)                          echo "--sort-r" ;;
     "--sort"*)                            echo "--sort" ;;
-    # Paste Destination
     "--tohtml"*)                          echo "--tohtml" ;;
     "--toexcel"*)                         echo "--toexcel" ;;
     "--csv2md"*)                          echo "--csv2md" ;;
     "--csv2html"*)                        echo "--csv2html" ;;
-    "--md2csv"*)                          echo "--md2csv" ;;
-    "--md2html"*)                         echo "--md2html" ;;
     *) ;;
   esac
 }
@@ -86,11 +82,34 @@ label_to_flags() {
 # Build the preview script
 # ──────────────────────────────────────────────
 
-# Cache clipboard to temp file (avoids repeated powershell.exe calls on WSL)
+# Temp files
 CLIP_TMP="${TMPDIR:-/tmp}/.clip-tui-input-$$"
+SEL_FILE="${TMPDIR:-/tmp}/.clip-tui-selections-$$"
+TOGGLE_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-toggle-$$"
 REFRESH_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-refresh-$$"
+PREVIEW_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-preview-$$"
 clip_paste > "$CLIP_TMP"
-trap 'rm -f "$CLIP_TMP" "$PREVIEW_SCRIPT" "$REFRESH_SCRIPT"' EXIT
+: > "$SEL_FILE"
+trap 'rm -f "$CLIP_TMP" "$SEL_FILE" "$TOGGLE_SCRIPT" "$REFRESH_SCRIPT" "$PREVIEW_SCRIPT"' EXIT
+
+# Toggle script — tracks selections in toggle order using line numbers
+# Uses {n} (0-based line index) to avoid special character matching issues
+cat > "$TOGGLE_SCRIPT" << TOGGLE_EOF
+#!/usr/bin/env bash
+SEL_FILE="$SEL_FILE"
+line_num="\$1"
+if grep -qx "\$line_num" "\$SEL_FILE" 2>/dev/null; then
+  { grep -vx "\$line_num" "\$SEL_FILE" || true; } > "\$SEL_FILE.tmp"
+  mv "\$SEL_FILE.tmp" "\$SEL_FILE"
+else
+  echo "\$line_num" >> "\$SEL_FILE"
+fi
+TOGGLE_EOF
+chmod +x "$TOGGLE_SCRIPT"
+
+# Items list file — so preview can resolve line numbers to labels
+ITEMS_FILE="${TMPDIR:-/tmp}/.clip-tui-items-$$"
+trap 'rm -f "$CLIP_TMP" "$SEL_FILE" "$TOGGLE_SCRIPT" "$REFRESH_SCRIPT" "$PREVIEW_SCRIPT" "$ITEMS_FILE"' EXIT
 
 # Refresh script — re-reads clipboard into the cache file
 cat > "$REFRESH_SCRIPT" << REFRESH_EOF
@@ -110,7 +129,8 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 CLIP="clip"
 CLIP_TMP="$1"
-shift
+SEL_FILE="$2"
+ITEMS_FILE="$3"
 
 label_to_flags() {
   case "$1" in
@@ -122,12 +142,14 @@ label_to_flags() {
     "Clean list"*)                        echo "--trim --dedup" ;;
     "Flatten text"*)                      echo "--trim --unformat --unwrap --collapse" ;;
     "--claude"*)                          echo "--claude" ;;
-    "--md"*)                              echo "--md" ;;
+    "--md2csv"*)                          echo "--md2csv" ;;
+    "--md2html"*)                         echo "--md2html" ;;
+    "--md "*)                             echo "--md" ;;
     "--boxtable"*)                        echo "--boxtable" ;;
     "--unwrap"*)                          echo "--unwrap" ;;
+    "--strip-blank"*)                     echo "--strip-blank" ;;
     "--trim"*)                            echo "--trim" ;;
     "--rtrim"*)                           echo "--rtrim" ;;
-    "--strip-blank"*)                     echo "--strip-blank" ;;
     "--collapse"*)                        echo "--collapse" ;;
     "--dedup"*)                           echo "--dedup" ;;
     "--unformat"*)                        echo "--unformat" ;;
@@ -141,21 +163,20 @@ label_to_flags() {
     "--toexcel"*)                         echo "--toexcel" ;;
     "--csv2md"*)                          echo "--csv2md" ;;
     "--csv2html"*)                        echo "--csv2html" ;;
-    "--md2csv"*)                          echo "--md2csv" ;;
-    "--md2html"*)                         echo "--md2html" ;;
     *) ;;
   esac
 }
 
-selections_file="$1"
-
 flags=""
-if [ -f "$selections_file" ]; then
-  while IFS= read -r sel; do
+if [ -f "$SEL_FILE" ] && [ -s "$SEL_FILE" ]; then
+  while IFS= read -r line_num; do
+    [ -z "$line_num" ] && continue
+    # Resolve line number to item label (line numbers are 0-based from fzf {n})
+    sel=$(sed -n "$((line_num + 1))p" "$ITEMS_FILE" 2>/dev/null)
     [ -z "$sel" ] && continue
     f=$(label_to_flags "$sel")
     [ -n "$f" ] && flags="$flags $f"
-  done < "$selections_file"
+  done < "$SEL_FILE"
 fi
 
 if [ -z "$flags" ]; then
@@ -168,7 +189,19 @@ else
   echo "── clip$flags ──"
   echo ""
   # shellcheck disable=SC2086
-  cat "$CLIP_TMP" | "$CLIP" $flags --no-copy 2>/dev/null | head -50
+  output=$(cat "$CLIP_TMP" | "$CLIP" $flags --no-copy 2>/dev/null)
+
+  # If output looks like HTML, render it for readable preview
+  if echo "$output" | head -1 | grep -q '<[a-z]'; then
+    if command -v pandoc &>/dev/null; then
+      echo "$output" | pandoc -f html -t gfm --wrap=auto 2>/dev/null
+    else
+      # Strip HTML tags as fallback
+      echo "$output" | sed 's/<[^>]*>//g; /^$/d'
+    fi
+  else
+    echo "$output" | head -50
+  fi
 fi
 PREVIEW_EOF
 chmod +x "$PREVIEW_SCRIPT"
@@ -212,6 +245,9 @@ Flatten text                 (--trim --unformat --unwrap --collapse)
 --md2csv                     → Markdown table to Excel TSV
 --md2html                    → Markdown table to HTML table"
 
+# Save items to file for line-number lookup in preview
+echo "$items" > "$ITEMS_FILE"
+
 # ──────────────────────────────────────────────
 # Run fzf
 # ──────────────────────────────────────────────
@@ -220,6 +256,8 @@ Flatten text                 (--trim --unformat --unwrap --collapse)
 fzf_version=$(fzf --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
 fzf_major=$(echo "$fzf_version" | cut -d. -f1)
 fzf_minor=$(echo "$fzf_version" | cut -d. -f2)
+# Treat fzf 1.0+ as having all features
+fzf_ver_num=$((fzf_major * 100 + fzf_minor))
 
 fzf_args=(
   --multi
@@ -227,7 +265,7 @@ fzf_args=(
   --cycle
   --reverse
   --height=100%
-  --preview="$PREVIEW_SCRIPT $CLIP_TMP {+f}"
+  --preview="$PREVIEW_SCRIPT $CLIP_TMP $SEL_FILE $ITEMS_FILE"
   --preview-window=right:55%:wrap
   --ansi
   --prompt="transforms> "
@@ -236,12 +274,10 @@ fzf_args=(
 )
 
 # Features available in fzf 0.35+
-if [[ "$fzf_minor" -ge 35 ]] 2>/dev/null; then
+if [[ "$fzf_ver_num" -ge 35 ]]; then
   fzf_args+=(
     --border=rounded
-    --header="clip ✂ clipboard transformer
-
- Tab: toggle  Enter: apply  Ctrl-C: cancel"
+    --header="$(printf '\033[38;5;129m ██████╗\033[38;5;135m██╗     \033[38;5;171m██╗\033[38;5;209m██████╗ \033[0m\n\033[38;5;129m██╔════╝\033[38;5;135m██║     \033[38;5;171m██║\033[38;5;209m██╔══██╗\033[0m\n\033[38;5;135m██║     \033[38;5;171m██║     \033[38;5;171m██║\033[38;5;209m██████╔╝\033[0m\n\033[38;5;171m██║     \033[38;5;207m██║     \033[38;5;209m██║\033[38;5;215m██╔═══╝ \033[0m\n\033[38;5;207m╚██████╗\033[38;5;209m███████╗\033[38;5;215m██║\033[38;5;221m██║     \033[0m\n\033[38;5;209m ╚═════╝\033[38;5;215m╚══════╝\033[38;5;221m╚═╝\033[38;5;221m╚═╝     \033[0m\n\033[38;5;240m ✂ clipboard transformer\033[0m\n\n Tab: toggle  Enter: apply  Ctrl-C: cancel\n Del: clear   R: refresh')"
     --color='border:#8b5cf6,header:#6b7280'
   )
 else
@@ -250,18 +286,25 @@ else
   )
 fi
 
-# Features available in fzf 0.36+
-if [[ "$fzf_minor" -ge 36 ]] 2>/dev/null; then
-  fzf_args+=(--header-first)
+# Features available in fzf 0.36+ (execute-silent, refresh-preview, header-first)
+if [[ "$fzf_ver_num" -ge 36 ]]; then
+  fzf_args+=(
+    --header-first
+    --bind "tab:execute-silent($TOGGLE_SCRIPT {n})+toggle+down+refresh-preview"
+  )
+else
+  fzf_args+=(
+    --bind "tab:toggle+down"
+  )
 fi
 
 # Features available in fzf 0.46+
-if [[ "$fzf_minor" -ge 46 ]] 2>/dev/null; then
+if [[ "$fzf_ver_num" -ge 46 ]]; then
   fzf_args+=(
     --border-label=" ✂ "
     --border-label-pos=3
     --color='label:#8b5cf6'
-    --bind "del:execute-silent(: > $CLIP_TMP)+reload(echo \"$items\")+clear-selection"
+    --bind "del:execute-silent(: > $CLIP_TMP; : > $SEL_FILE)+reload(echo \"$items\")+clear-selection"
     --bind "r:execute-silent($REFRESH_SCRIPT)+refresh-preview"
   )
 fi

@@ -233,32 +233,11 @@ fn_upper() {
 }
 
 fn_title() {
-  awk '{
-    for (i = 1; i <= NF; i++) {
-      $i = toupper(substr($i, 1, 1)) tolower(substr($i, 2))
-    }
-    print
-  }'
+  perl -CSD -pe 's/(\S+)/ucfirst(lc($1))/ge'
 }
 
 fn_sentence() {
-  awk '{
-    $0 = tolower($0)
-    # Capitalize first letter of the line
-    for (i = 1; i <= length($0); i++) {
-      c = substr($0, i, 1)
-      if (c ~ /[a-zA-Z]/) {
-        $0 = substr($0, 1, i-1) toupper(c) substr($0, i+1)
-        break
-      }
-    }
-    # Capitalize after sentence-ending punctuation followed by space
-    while (match($0, /[.!?] [a-z]/)) {
-      pos = RSTART + 2
-      $0 = substr($0, 1, pos-1) toupper(substr($0, pos, 1)) substr($0, pos+1)
-    }
-    print
-  }'
+  perl -CSD -pe '$_ = lc; s/^(\s*\W*)(\w)/uc($2)/e; s/([.!?]\s+)(\w)/$1.uc($2)/ge'
 }
 
 fn_sort() {
