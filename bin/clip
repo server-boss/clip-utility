@@ -14,8 +14,15 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 detect_platform() {
   case "$(uname -s)" in
     Darwin)  CLIP_PLATFORM="macos" ;;
-    Linux)   CLIP_PLATFORM="linux" ;;
-    MINGW*|MSYS*|CYGWIN*) CLIP_PLATFORM="windows" ;;
+    Linux)
+      # WSL has powershell.exe available — use Windows clipboard
+      if grep -qi microsoft /proc/version 2>/dev/null; then
+        CLIP_PLATFORM="wsl"
+      else
+        CLIP_PLATFORM="linux"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*) CLIP_PLATFORM="wsl" ;;
     *)       CLIP_PLATFORM="unknown" ;;
   esac
 }
@@ -35,7 +42,7 @@ clipboard_read() {
         return 1
       fi
       ;;
-    windows) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
+    wsl)     powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//' ;;
     *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
   esac
 }
@@ -55,7 +62,7 @@ clipboard_write() {
         return 1
       fi
       ;;
-    windows) powershell.exe -Command "Set-Clipboard -Value (\$input | Out-String)" 2>/dev/null ;;
+    wsl)     clip.exe ;;
     *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
   esac
 }
@@ -77,8 +84,8 @@ clipboard_read_html() {
         wl-paste --type text/html 2>/dev/null || true
       fi
       ;;
-    windows)
-      powershell.exe -Command "Get-Clipboard -Format Html" 2>/dev/null || true
+    wsl)
+      powershell.exe -NoProfile -Command "Get-Clipboard -Format Html" 2>/dev/null | sed 's/\r$//' || true
       ;;
   esac
 }
@@ -116,12 +123,9 @@ clipboard_write_html() {
         printf '%s' "$html" | clipboard_write
       fi
       ;;
-    windows)
-      # Windows CF_HTML requires a special header format
-      local header
-      header=$(printf 'Version:0.9\r\nStartHTML:00000097\r\nEndHTML:%08d\r\nStartFragment:00000097\r\nEndFragment:%08d\r\n' \
-        $((97 + ${#html})) $((97 + ${#html})))
-      printf '%s%s' "$header" "$html" | powershell.exe -Command "Set-Clipboard -Value (\$input | Out-String) -AsHtml" 2>/dev/null
+    wsl)
+      # Fallback: copy as plain text (Windows HTML clipboard requires CF_HTML format)
+      printf '%s' "$html" | clip.exe
       ;;
   esac
 }

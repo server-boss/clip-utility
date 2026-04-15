@@ -12,15 +12,17 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 CLIP="clip"
 
 # ── Platform clipboard helpers ──
+_is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+
 clip_paste() {
   case "$(uname -s)" in
     Darwin)  pbpaste ;;
     Linux)
-      if command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
+      if _is_wsl; then powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//'
+      elif command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
       elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
       elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
       fi ;;
-    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
   esac
 }
 
@@ -28,10 +30,10 @@ clip_clear() {
   case "$(uname -s)" in
     Darwin)  pbcopy < /dev/null ;;
     Linux)
-      if command -v xclip &>/dev/null; then echo -n | xclip -selection clipboard -i 2>/dev/null
+      if _is_wsl; then powershell.exe -NoProfile -Command "Set-Clipboard -Value ''" 2>/dev/null
+      elif command -v xclip &>/dev/null; then echo -n | xclip -selection clipboard -i 2>/dev/null
       elif command -v wl-copy &>/dev/null; then wl-copy --clear 2>/dev/null
       fi ;;
-    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Set-Clipboard -Value ''" 2>/dev/null ;;
   esac
 }
 
@@ -93,15 +95,17 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 CLIP="clip"
 
+_is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+
 clip_paste() {
   case "$(uname -s)" in
     Darwin)  pbpaste ;;
     Linux)
-      if command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
+      if _is_wsl; then powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//'
+      elif command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
       elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
       elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
       fi ;;
-    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
   esac
 }
 
