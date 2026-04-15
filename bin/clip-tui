@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -eo pipefail
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+# ──────────────────────────────────────────────
+# clip-tui — interactive clipboard transformer
+# ──────────────────────────────────────────────
+# Uses fzf multi-select with live preview.
+# Select transforms with Tab, press Enter to apply.
+
+CLIP="clip"
+
+# ──────────────────────────────────────────────
+# Label → flags mapping
+# ──────────────────────────────────────────────
+
+label_to_flags() {
+  case "$1" in
+    # Presets
+    "Claude → Markdown"*)                 echo "--claude --unwrap" ;;
+    "Claude → Rich"*)                     echo "--claude --unwrap --tohtml" ;;
+    "Claude → Excel"*)                    echo "--claude --unwrap --toexcel" ;;
+    "Rich → Markdown"*)                   echo "--md --rtrim --strip-blank" ;;
+    "Markdown → Rich"*)                   echo "--tohtml" ;;
+    "Clean list"*)                        echo "--trim --dedup" ;;
+    "Flatten text"*)                      echo "--trim --unformat --unwrap --collapse" ;;
+    # Clipboard Source
+    "--claude"*)                          echo "--claude" ;;
+    "--md"*)                              echo "--md" ;;
+    "--boxtable"*)                        echo "--boxtable" ;;
+    "--unwrap"*)                          echo "--unwrap" ;;
+    # Formatting
+    "--trim"*)                            echo "--trim" ;;
+    "--rtrim"*)                           echo "--rtrim" ;;
+    "--strip-blank"*)                     echo "--strip-blank" ;;
+    "--collapse"*)                        echo "--collapse" ;;
+    "--dedup"*)                           echo "--dedup" ;;
+    "--unformat"*)                        echo "--unformat" ;;
+    # Case
+    "--lower"*)                           echo "--lower" ;;
+    "--upper"*)                           echo "--upper" ;;
+    "--title"*)                           echo "--title" ;;
+    "--sentence"*)                        echo "--sentence" ;;
+    # Sort
+    "--sort-r"*)                          echo "--sort-r" ;;
+    "--sort"*)                            echo "--sort" ;;
+    # Paste Destination
+    "--tohtml"*)                          echo "--tohtml" ;;
+    "--toexcel"*)                         echo "--toexcel" ;;
+    "--csv2md"*)                          echo "--csv2md" ;;
+    "--csv2html"*)                        echo "--csv2html" ;;
+    "--md2csv"*)                          echo "--md2csv" ;;
+    "--md2html"*)                         echo "--md2html" ;;
+    *) ;;
+  esac
+}
+
+# ──────────────────────────────────────────────
+# Build the preview script
+# ──────────────────────────────────────────────
+
+PREVIEW_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-preview-$$"
+cat > "$PREVIEW_SCRIPT" << 'PREVIEW_EOF'
+#!/usr/bin/env bash
+set -eo pipefail
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+CLIP="clip"
+
+label_to_flags() {
+  case "$1" in
+    "Claude → Markdown"*)                 echo "--claude --unwrap" ;;
+    "Claude → Rich"*)                     echo "--claude --unwrap --tohtml" ;;
+    "Claude → Excel"*)                    echo "--claude --unwrap --toexcel" ;;
+    "Rich → Markdown"*)                   echo "--md --rtrim --strip-blank" ;;
+    "Markdown → Rich"*)                   echo "--tohtml" ;;
+    "Clean list"*)                        echo "--trim --dedup" ;;
+    "Flatten text"*)                      echo "--trim --unformat --unwrap --collapse" ;;
+    "--claude"*)                          echo "--claude" ;;
+    "--md"*)                              echo "--md" ;;
+    "--boxtable"*)                        echo "--boxtable" ;;
+    "--unwrap"*)                          echo "--unwrap" ;;
+    "--trim"*)                            echo "--trim" ;;
+    "--rtrim"*)                           echo "--rtrim" ;;
+    "--strip-blank"*)                     echo "--strip-blank" ;;
+    "--collapse"*)                        echo "--collapse" ;;
+    "--dedup"*)                           echo "--dedup" ;;
+    "--unformat"*)                        echo "--unformat" ;;
+    "--lower"*)                           echo "--lower" ;;
+    "--upper"*)                           echo "--upper" ;;
+    "--title"*)                           echo "--title" ;;
+    "--sentence"*)                        echo "--sentence" ;;
+    "--sort-r"*)                          echo "--sort-r" ;;
+    "--sort"*)                            echo "--sort" ;;
+    "--tohtml"*)                          echo "--tohtml" ;;
+    "--toexcel"*)                         echo "--toexcel" ;;
+    "--csv2md"*)                          echo "--csv2md" ;;
+    "--csv2html"*)                        echo "--csv2html" ;;
+    "--md2csv"*)                          echo "--md2csv" ;;
+    "--md2html"*)                         echo "--md2html" ;;
+    *) ;;
+  esac
+}
+
+selections_file="$1"
+
+flags=""
+if [ -f "$selections_file" ]; then
+  while IFS= read -r sel; do
+    [ -z "$sel" ] && continue
+    f=$(label_to_flags "$sel")
+    [ -n "$f" ] && flags="$flags $f"
+  done < "$selections_file"
+fi
+
+if [ -z "$flags" ]; then
+  echo "── Clipboard contents (raw) ──"
+  echo ""
+  pbpaste | head -50
+else
+  echo "── clip$flags ──"
+  echo ""
+  # shellcheck disable=SC2086
+  pbpaste | "$CLIP" $flags --no-copy 2>/dev/null | head -50
+fi
+PREVIEW_EOF
+chmod +x "$PREVIEW_SCRIPT"
+
+# ──────────────────────────────────────────────
+# Build the item list
+# ──────────────────────────────────────────────
+
+items="Claude → Markdown            (--claude --unwrap)
+Claude → Rich                (--claude --unwrap --tohtml)
+Claude → Excel               (--claude --unwrap --toexcel)
+Rich → Markdown              (--md --rtrim --strip-blank)
+Markdown → Rich              (--tohtml)
+Clean list                   (--trim --dedup)
+Flatten text                 (--trim --unformat --unwrap --collapse)
+───────────────────────────────────
+--claude                     Claude terminal → clean Markdown
+--md                         Rich HTML clipboard → Markdown
+--boxtable                   Box-drawing table → Markdown table
+--unwrap                     Rejoin hard-wrapped paragraph lines
+───────────────────────────────────
+--trim                       Strip leading + trailing whitespace
+--rtrim                      Strip trailing whitespace only
+--strip-blank                Remove blank lines
+--collapse                   Collapse whitespace runs to single space
+--dedup                      Remove duplicate lines
+--unformat                   Normalize smart quotes, dashes, spaces
+───────────────────────────────────
+--lower                      lowercase
+--upper                      UPPERCASE
+--title                      Title Case
+--sentence                   Sentence case
+───────────────────────────────────
+--sort                       Sort lines A → Z
+--sort-r                     Sort lines Z → A
+───────────────────────────────────
+--tohtml                     → Rich HTML (Gmail, Mail, Word, Notes)
+--toexcel                    → Excel-friendly (tables as TSV, strips markdown)
+--csv2md                     → CSV to Markdown table
+--csv2html                   → CSV to HTML table (Apple Notes)
+--md2csv                     → Markdown table to Excel TSV
+--md2html                    → Markdown table to HTML table"
+
+# ──────────────────────────────────────────────
+# Run fzf
+# ──────────────────────────────────────────────
+
+selected=$(echo "$items" | fzf \
+  --multi \
+  --no-sort \
+  --cycle \
+  --reverse \
+  --height=100% \
+  --border=rounded \
+  --border-label=" clip — clipboard transformer " \
+  --border-label-pos=3 \
+  --header="Tab: toggle  Enter: apply  Ctrl-C: cancel" \
+  --header-first \
+  --preview="$PREVIEW_SCRIPT {+f}" \
+  --preview-window=right:55%:wrap \
+  --color='border:#8b5cf6,label:#8b5cf6,header:#6b7280' \
+  --prompt="transforms> " \
+  --marker="✓" \
+  --pointer="▸" \
+  2>/dev/null) || { echo "[clip-tui] Cancelled"; exit 0; }
+
+# ──────────────────────────────────────────────
+# Build and execute clip command
+# ──────────────────────────────────────────────
+
+flags=""
+while IFS= read -r sel; do
+  [ -z "$sel" ] && continue
+  case "$sel" in "──"*) continue ;; esac
+  f=$(label_to_flags "$sel")
+  [ -n "$f" ] && flags="$flags $f"
+done <<< "$selected"
+
+if [ -z "$flags" ]; then
+  echo "[clip-tui] No transforms selected"
+  exit 0
+fi
+
+# shellcheck disable=SC2086
+"$CLIP" $flags

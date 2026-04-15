@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ──────────────────────────────────────────────
+# clip-menu — macOS dialog menu for clip transforms
+# ──────────────────────────────────────────────
+# For use from Apple Shortcuts or Spotlight.
+# For full TUI with live preview, use clip-tui instead.
+
+CLIP="clip"
+
+# ── Step 1: Category ──
+category=$(osascript -e '
+  choose from list {¬
+    "📄 Format Conversion", ¬
+    "📊 Table Conversion", ¬
+    "🔧 Open TUI (full preview)" ¬
+  } with title "Clip" with prompt "What do you need?" default items {"📄 Format Conversion"}
+' 2>/dev/null) || exit 0
+[[ "$category" == "false" ]] && exit 0
+
+case "$category" in
+
+  "📄 Format Conversion")
+    choice=$(osascript -e '
+      choose from list {¬
+        "Claude → Rich (Gmail/Mail/Word/Notes)", ¬
+        "Claude → Markdown (GitHub/Typora)", ¬
+        "Claude → Excel (full document)", ¬
+        "Rich → Markdown", ¬
+        "Markdown → Rich" ¬
+      } with title "Clip — Format" with prompt "Convert clipboard from → to:"
+    ' 2>/dev/null) || exit 0
+    [[ "$choice" == "false" ]] && exit 0
+
+    case "$choice" in
+      "Claude → Rich"*)       "$CLIP" --claude --unwrap --tohtml ;;
+      "Claude → Markdown"*)   "$CLIP" --claude --unwrap ;;
+      "Claude → Excel"*)      "$CLIP" --claude --unwrap --toexcel ;;
+      "Rich → Markdown"*)     "$CLIP" --md --rtrim --strip-blank ;;
+      "Markdown → Rich"*)     "$CLIP" --tohtml ;;
+    esac
+    ;;
+
+  "📊 Table Conversion")
+    choice=$(osascript -e '
+      choose from list {¬
+        "Markdown Table → Excel", ¬
+        "Box-drawing Table → Excel", ¬
+        "CSV → Markdown Table", ¬
+        "CSV → Apple Notes Table", ¬
+        "Markdown Table → Apple Notes Table", ¬
+        "Box-drawing Table → Markdown" ¬
+      } with title "Clip — Tables" with prompt "Convert table:"
+    ' 2>/dev/null) || exit 0
+    [[ "$choice" == "false" ]] && exit 0
+
+    case "$choice" in
+      "Markdown Table → Excel")              "$CLIP" --md2csv ;;
+      "Box-drawing Table → Excel")           "$CLIP" --boxtable --md2csv ;;
+      "CSV → Markdown Table")                "$CLIP" --csv2md ;;
+      "CSV → Apple Notes Table")             "$CLIP" --csv2html ;;
+      "Markdown Table → Apple Notes Table")  "$CLIP" --md2html ;;
+      "Box-drawing Table → Markdown")        "$CLIP" --boxtable ;;
+    esac
+    ;;
+
+  "🔧 Open TUI (full preview)")
+    # Open clip-tui in a new terminal window
+    osascript -e '
+      tell application "Terminal"
+        activate
+        do script "clip-tui"
+      end tell
+    ' 2>/dev/null
+    exit 0
+    ;;
+esac
+
+osascript -e 'display notification "Clipboard transformed" with title "Clip" sound name "Pop"' 2>/dev/null || true

@@ -1,0 +1,751 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+# ──────────────────────────────────────────────
+# clip — composable clipboard text transformer
+# ──────────────────────────────────────────────
+# Usage:
+#   clip --trim --dedup --lower          Chain transforms, result → clipboard
+#   clip --md --trim                     HTML clipboard → markdown → trim
+#   echo "text" | clip --upper           Pipe in instead of reading clipboard
+#   clip --trim --no-copy                Print to stdout instead of clipboard
+#
+# Transforms are applied left-to-right in the order you specify.
+
+usage() {
+  cat <<'EOF'
+clip — composable clipboard text transformer
+
+Usage: clip [transform ...] [options]
+       echo "text" | clip [transform ...] [options]
+       clip-tui                              Interactive TUI with live preview
+
+Presets (common combos):
+  clip --claude --unwrap                 Claude terminal → Markdown
+  clip --claude --unwrap --tohtml        Claude terminal → Rich (Gmail/Mail/Word/Notes)
+  clip --claude --unwrap --toexcel       Claude terminal → Excel
+  clip --md --rtrim --strip-blank        Rich → Markdown
+  clip --tohtml                          Markdown → Rich
+
+Clipboard Source:
+  --claude           Claude terminal output → clean Markdown
+  --md               Rich HTML clipboard → Markdown (requires pandoc)
+  --boxtable         Box-drawing table → Markdown table
+  --unwrap           Rejoin hard-wrapped paragraph lines
+
+Formatting:
+  --trim             Strip leading + trailing whitespace
+  --rtrim            Strip trailing whitespace only (preserves indentation)
+  --strip-blank      Remove blank lines
+  --collapse         Collapse whitespace runs to single space
+  --dedup            Remove duplicate lines (preserves order)
+  --unformat         Normalize smart quotes, dashes, spaces
+
+Case:
+  --lower            lowercase
+  --upper            UPPERCASE
+  --title            Title Case
+  --sentence         Sentence case
+
+Sort:
+  --sort             Sort lines A → Z
+  --sort-r           Sort lines Z → A
+
+Lists:
+  --join SEP         Join lines with separator       (e.g. --join ", ")
+  --split SEP        Split by separator into lines   (e.g. --split ",")
+  --prefix STR       Add prefix to each line
+  --suffix STR       Add suffix to each line
+  --wrap PRE SUF     Wrap each line with prefix and suffix
+
+Paste Destination:
+  --tohtml           → Rich HTML (Gmail, Mail, Word, Notes)
+  --toexcel          → Excel-friendly (tables as TSV, strips markdown)
+  --csv2md           → CSV to Markdown table
+  --csv2html         → CSV to HTML table (Apple Notes)
+  --md2csv           → Markdown table to Excel TSV
+  --md2html          → Markdown table to HTML table
+  --rich             → Force rich HTML clipboard copy
+
+Options:
+  --no-copy          Print to stdout instead of copying to clipboard
+  -h, --help         Show this help
+EOF
+}
+
+# ──────────────────────────────────────────────
+# Transform functions — each reads stdin, writes stdout
+# ──────────────────────────────────────────────
+
+fn_trim() {
+  sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+fn_rtrim() {
+  sed 's/[[:space:]]*$//'
+}
+
+fn_strip_blank() {
+  sed '/^[[:space:]]*$/d'
+}
+
+fn_collapse() {
+  sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
+}
+
+fn_dedup() {
+  awk '!seen[$0]++'
+}
+
+fn_lower() {
+  tr '[:upper:]' '[:lower:]'
+}
+
+fn_upper() {
+  tr '[:lower:]' '[:upper:]'
+}
+
+fn_title() {
+  awk '{
+    for (i = 1; i <= NF; i++) {
+      $i = toupper(substr($i, 1, 1)) tolower(substr($i, 2))
+    }
+    print
+  }'
+}
+
+fn_sentence() {
+  awk '{
+    $0 = tolower($0)
+    # Capitalize first letter of the line
+    for (i = 1; i <= length($0); i++) {
+      c = substr($0, i, 1)
+      if (c ~ /[a-zA-Z]/) {
+        $0 = substr($0, 1, i-1) toupper(c) substr($0, i+1)
+        break
+      }
+    }
+    # Capitalize after sentence-ending punctuation followed by space
+    while (match($0, /[.!?] [a-z]/)) {
+      pos = RSTART + 2
+      $0 = substr($0, 1, pos-1) toupper(substr($0, pos, 1)) substr($0, pos+1)
+    }
+    print
+  }'
+}
+
+fn_sort() {
+  sort
+}
+
+fn_sort_r() {
+  sort -r
+}
+
+fn_unformat() {
+  sed "
+    s/$(printf '\xC2\xA0')/ /g
+    s/$(printf '\xE2\x80\x9C')/\"/g
+    s/$(printf '\xE2\x80\x9D')/\"/g
+    s/$(printf '\xE2\x80\x98')/'/g
+    s/$(printf '\xE2\x80\x99')/'/g
+    s/$(printf '\xE2\x80\x93')/-/g
+    s/$(printf '\xE2\x80\x94')/--/g
+    s/$(printf '\xE2\x80\xA6')/.../g
+    s/$(printf '\xEF\xBB\xBF')//g
+  "
+}
+
+fn_claude() {
+  # Convert Claude Code terminal output to clean markdown.
+  # Handles: box tables (with multi-line cells), ★ Insight blocks,
+  # ▎ blockquotes, indentation stripping, and hard-wrap rejoining.
+  awk '
+    # ── Helper: flush accumulated table row ──
+    function flush_row() {
+      if (row_ncols > 0) {
+        printf "|"
+        for (_i = 1; _i <= row_ncols; _i++) printf " %s |", row_cells[_i]
+        print ""
+      }
+      delete row_cells
+      row_ncols = 0
+    }
+
+    # ── Box-drawing table handling ──
+    # Top border — enter table mode
+    /^[[:space:]]*┌/ { in_table = 1; sep_count = 0; next }
+
+    # Bottom border — flush and exit table
+    /^[[:space:]]*└/ {
+      flush_row()
+      in_table = 0
+      next
+    }
+
+    # Separator row — flush current logical row, emit md separator after header
+    /^[[:space:]]*├/ {
+      flush_row()
+      sep_count++
+      if (sep_count == 1 && tbl_ncols > 0) {
+        printf "|"
+        for (_i = 1; _i <= tbl_ncols; _i++) printf " --- |"
+        print ""
+      }
+      next
+    }
+
+    # Data row inside table — accumulate into current logical row
+    in_table && /│/ {
+      n = split($0, parts, "│")
+      ncols = n - 2
+      tbl_ncols = ncols
+
+      if (row_ncols == 0) {
+        # Start new logical row
+        row_ncols = ncols
+        for (i = 2; i < n; i++) {
+          cell = parts[i]
+          gsub(/^[[:space:]]+/, "", cell)
+          gsub(/[[:space:]]+$/, "", cell)
+          row_cells[i-1] = cell
+        }
+      } else {
+        # Continuation of current logical row — append to cells
+        for (i = 2; i < n; i++) {
+          cell = parts[i]
+          gsub(/^[[:space:]]+/, "", cell)
+          gsub(/[[:space:]]+$/, "", cell)
+          if (cell != "") {
+            if (row_cells[i-1] != "") row_cells[i-1] = row_cells[i-1] " " cell
+            else row_cells[i-1] = cell
+          }
+        }
+      }
+      next
+    }
+
+    # ── ★ Insight block ──
+    /^[[:space:]]*★.*─{3,}/ {
+      print ""
+      line = $0; sub(/^[[:space:]]+/, "", line)
+      print "> **" line "**"
+      print ">"
+      in_insight = 1
+      next
+    }
+    in_insight && /^[[:space:]]*─{3,}[[:space:]]*$/ {
+      in_insight = 0
+      print ""
+      next
+    }
+    in_insight {
+      sub(/^[[:space:]]+/, "")
+      print "> " $0
+      next
+    }
+
+    # ── ▎ blockquote bar ──
+    /^[[:space:]]*▎/ {
+      line = $0
+      sub(/^[[:space:]]*▎[[:space:]]?/, "", line)
+      if (!in_bq) { in_bq = 1 }
+      print "> " line
+      next
+    }
+    # Continue blockquote for indented continuation lines
+    in_bq && /^[[:space:]]+[^[:space:]]/ && !/^[[:space:]]*[-*0-9▎★┌│├└]/ {
+      line = $0; sub(/^[[:space:]]+/, "", line)
+      print "> " line
+      next
+    }
+    in_bq { in_bq = 0 }
+
+    # ── Regular lines — strip common leading indentation ──
+    {
+      line = $0
+      # Strip up to 2 leading spaces (Claude indents body text)
+      sub(/^  /, "", line)
+      print line
+    }
+  '
+}
+
+fn_boxtable() {
+  awk '
+    # Top border — skip
+    /^[[:space:]]*┌/ { next }
+    # Bottom border — skip
+    /^[[:space:]]*└/ { next }
+    # Separator row — only emit once (after header), derive col count from last data row
+    /^[[:space:]]*├/ {
+      if (!sep_done && ncols > 0) {
+        printf "|"
+        for (i = 1; i <= ncols; i++) printf " --- |"
+        print ""
+        sep_done = 1
+      }
+      next
+    }
+    # Data row — replace │ with |, trim cells
+    /│/ {
+      n = split($0, parts, "│")
+      ncols = n - 2  # exclude leading/trailing empty splits
+      printf "|"
+      for (i = 2; i < n; i++) {
+        cell = parts[i]
+        gsub(/^[[:space:]]+/, "", cell)
+        gsub(/[[:space:]]+$/, "", cell)
+        printf " %s |", cell
+      }
+      print ""
+      next
+    }
+    # Non-table lines — reset table state, pass through
+    { sep_done = 0; print }
+  '
+}
+
+fn_unwrap() {
+  awk '
+    # Join hard-wrapped lines within paragraphs and list items.
+    # Structural markers (-, *, #, |, >, numbered) flush the previous
+    # buffer and start a NEW buffer so their continuations get joined.
+    BEGIN { buf = "" }
+    /^[[:space:]]*$/ {
+      if (buf != "") { print buf; buf = "" }
+      print
+      next
+    }
+    /^[[:space:]]*[-*#|>]/ || /^[[:space:]]*[0-9]+\./ {
+      if (buf != "") { print buf; buf = "" }
+      buf = $0
+      next
+    }
+    {
+      if (buf == "") { buf = $0 }
+      else { buf = buf " " $0 }
+    }
+    END { if (buf != "") print buf }
+  '
+}
+
+fn_md() {
+  if ! command -v pandoc &>/dev/null; then
+    echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    cat
+    return 1
+  fi
+
+  local html
+  html=$(osascript -l JavaScript -e '
+    ObjC.import("AppKit");
+    var pb = $.NSPasteboard.generalPasteboard;
+    var html = pb.stringForType($.NSPasteboardTypeHTML);
+    html ? html.js : "";
+  ' 2>/dev/null || true)
+
+  if [[ -z "$html" ]]; then
+    echo "[clip] No HTML on clipboard, passing through as plain text" >&2
+    cat
+    return
+  fi
+
+  printf '%s' "$html" | pandoc -f html -t gfm --wrap=none 2>/dev/null | sed 's/\\\$/$/g; s/\\|/|/g'
+}
+
+fn_csv2md() {
+  awk '
+    BEGIN { FS = ","; OFS = "" }
+    {
+      # Handle quoted CSV fields (basic support)
+      n = 0
+      rest = $0
+      while (rest != "") {
+        if (substr(rest, 1, 1) == "\"") {
+          # Quoted field — find closing quote
+          rest = substr(rest, 2)
+          field = ""
+          while (1) {
+            p = index(rest, "\"")
+            if (p == 0) { field = field rest; rest = ""; break }
+            if (substr(rest, p+1, 1) == "\"") {
+              field = field substr(rest, 1, p)
+              rest = substr(rest, p+2)
+            } else {
+              field = field substr(rest, 1, p-1)
+              rest = substr(rest, p+1)
+              sub(/^,/, "", rest)
+              break
+            }
+          }
+        } else {
+          p = index(rest, ",")
+          if (p == 0) { field = rest; rest = "" }
+          else { field = substr(rest, 1, p-1); rest = substr(rest, p+1) }
+        }
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", field)
+        fields[++n] = field
+      }
+
+      # Print row
+      printf "|"
+      for (i = 1; i <= n; i++) printf " %s |", fields[i]
+      print ""
+
+      # Print separator after header
+      if (NR == 1) {
+        printf "|"
+        for (i = 1; i <= n; i++) printf " --- |"
+        print ""
+      }
+
+      delete fields
+    }
+  '
+}
+
+fn_md2csv() {
+  awk '
+    # Skip separator rows (e.g. | --- | --- |)
+    /^[[:space:]]*\|[[:space:]]*[-:]+[[:space:]]*\|/ { next }
+    # Data rows
+    /^[[:space:]]*\|/ {
+      # Strip leading/trailing pipe and whitespace
+      sub(/^[[:space:]]*\|/, "")
+      sub(/\|[[:space:]]*$/, "")
+      n = split($0, cells, "|")
+      for (i = 1; i <= n; i++) {
+        cell = cells[i]
+        gsub(/^[[:space:]]+/, "", cell)
+        gsub(/[[:space:]]+$/, "", cell)
+        if (i > 1) printf "\t"
+        printf "%s", cell
+      }
+      print ""
+      next
+    }
+    # Non-table lines — skip (only table data goes to Excel)
+  '
+}
+
+fn_tohtml() {
+  if ! command -v pandoc &>/dev/null; then
+    echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    cat
+    return 1
+  fi
+  pandoc -f markdown -t html --wrap=none 2>/dev/null | sed '
+    s/<h1[^>]*>/<p style="font-size:16pt;font-weight:bold;margin:12px 0 4px 0">/g
+    s/<\/h1>/<\/p>/g
+    s/<h2[^>]*>/<p style="font-size:13pt;font-weight:bold;margin:10px 0 4px 0">/g
+    s/<\/h2>/<\/p>/g
+    s/<h3[^>]*>/<p style="font-size:11pt;font-weight:bold;margin:8px 0 4px 0">/g
+    s/<\/h3>/<\/p>/g
+    s/<h4[^>]*>/<p style="font-size:10pt;font-weight:bold;margin:6px 0 4px 0">/g
+    s/<\/h4>/<\/p>/g
+    s/<p>/<p style="font-size:10pt">/g
+    s/<li>/<li style="font-size:10pt">/g
+    s/<table>/<table style="border-collapse:collapse;border:1px solid #ccc;font-size:10pt">/g
+    s/<th>/<th style="border:1px solid #ccc;padding:6px 10px;font-weight:bold">/g
+    s/<td>/<td style="border:1px solid #ccc;padding:6px 10px">/g
+    s/<blockquote>/<blockquote style="border-left:3px solid #ccc;padding-left:12px;margin:8px 0;font-size:10pt">/g
+    s/<code>/<code style="padding:2px 5px;border-radius:3px;font-family:monospace;font-size:9pt">/g
+    s/<pre>/<pre style="padding:12px;border-radius:4px;overflow-x:auto;font-size:9pt">/g
+  '
+}
+
+fn_md2html() {
+  awk '
+    BEGIN { print "<table style=\"border-collapse:collapse\">" }
+    # Skip separator rows (| --- | --- |)
+    /^[[:space:]]*\|[[:space:]]*[-:]+[[:space:]]*\|/ { next }
+    # Data rows
+    /^[[:space:]]*\|/ {
+      sub(/^[[:space:]]*\|/, "")
+      sub(/\|[[:space:]]*$/, "")
+      n = split($0, cells, "|")
+      if (row == 0) tag = "th"; else tag = "td"
+      print "  <tr>"
+      for (i = 1; i <= n; i++) {
+        cell = cells[i]
+        gsub(/^[[:space:]]+/, "", cell)
+        gsub(/[[:space:]]+$/, "", cell)
+        printf "    <%s style=\"border:1px solid #ccc;padding:6px 10px\">%s</%s>\n", tag, cell, tag
+      }
+      print "  </tr>"
+      row++
+    }
+    END { print "</table>" }
+  '
+}
+
+fn_csv2html() {
+  awk '
+    BEGIN { FS = ","; OFS = ""; print "<table style=\"border-collapse:collapse\">" }
+    {
+      n = 0
+      rest = $0
+      while (rest != "") {
+        if (substr(rest, 1, 1) == "\"") {
+          rest = substr(rest, 2)
+          field = ""
+          while (1) {
+            p = index(rest, "\"")
+            if (p == 0) { field = field rest; rest = ""; break }
+            if (substr(rest, p+1, 1) == "\"") {
+              field = field substr(rest, 1, p)
+              rest = substr(rest, p+2)
+            } else {
+              field = field substr(rest, 1, p-1)
+              rest = substr(rest, p+1)
+              sub(/^,/, "", rest)
+              break
+            }
+          }
+        } else {
+          p = index(rest, ",")
+          if (p == 0) { field = rest; rest = "" }
+          else { field = substr(rest, 1, p-1); rest = substr(rest, p+1) }
+        }
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", field)
+        # Escape HTML entities
+        gsub(/&/, "\\&amp;", field)
+        gsub(/</, "\\&lt;", field)
+        gsub(/>/, "\\&gt;", field)
+        fields[++n] = field
+      }
+
+      if (NR == 1) tag = "th"; else tag = "td"
+      print "  <tr>"
+      for (i = 1; i <= n; i++)
+        printf "    <%s style=\"border:1px solid #ccc;padding:6px 10px\">%s</%s>\n", tag, fields[i], tag
+      print "  </tr>"
+      delete fields
+    }
+    END { print "</table>" }
+  '
+}
+
+fn_toexcel() {
+  # Convert markdown document for Excel paste:
+  # - Pipe tables → TSV (spread across columns)
+  # - Strip markdown formatting (**, >, #, ---, ★ borders)
+  # - Each line → one row
+  awk '
+    # Skip separator rows
+    /^[[:space:]]*\|[[:space:]]*[-:]+[[:space:]]*\|/ { next }
+
+    # Skip ★ decoration borders
+    /^[[:space:]]*─{3,}[[:space:]]*$/ { next }
+
+    # Pipe table rows → TSV
+    /^[[:space:]]*\|/ {
+      sub(/^[[:space:]]*\|/, "")
+      sub(/\|[[:space:]]*$/, "")
+      n = split($0, cells, "|")
+      for (i = 1; i <= n; i++) {
+        cell = cells[i]
+        gsub(/^[[:space:]]+/, "", cell)
+        gsub(/[[:space:]]+$/, "", cell)
+        # Strip markdown bold/italic from cells
+        gsub(/\*\*/, "", cell)
+        gsub(/\*/, "", cell)
+        gsub(/__/, "", cell)
+        gsub(/_/, "", cell)
+        if (i > 1) printf "\t"
+        printf "%s", cell
+      }
+      print ""
+      next
+    }
+
+    # Regular lines — strip markdown formatting
+    {
+      line = $0
+
+      # Strip blockquote markers
+      gsub(/^[[:space:]]*>[[:space:]]*/, "", line)
+
+      # Strip heading markers
+      sub(/^#{1,6}[[:space:]]+/, "", line)
+
+      # Strip bold/italic markers
+      gsub(/\*\*/, "", line)
+      gsub(/\*/, "", line)
+      gsub(/__/, "", line)
+
+      # Strip ★ Insight decoration (keep the word, drop the dashes)
+      gsub(/─+/, "", line)
+
+      # Strip list markers (- and * bullets, numbered lists)
+      sub(/^[[:space:]]*[-*][[:space:]]+/, "", line)
+      sub(/^[[:space:]]*[0-9]+\.[[:space:]]+/, "", line)
+
+      # Strip leading/trailing whitespace
+      gsub(/^[[:space:]]+/, "", line)
+      gsub(/[[:space:]]+$/, "", line)
+
+      # Skip empty lines that result from stripping
+      if (line == "") { print ""; next }
+
+      print line
+    }
+  '
+}
+
+fn_join() {
+  local sep="$1"
+  local first=true
+  while IFS= read -r line; do
+    if $first; then
+      printf '%s' "$line"
+      first=false
+    else
+      printf '%s%s' "$sep" "$line"
+    fi
+  done
+}
+
+fn_split() {
+  local sep="$1"
+  local IFS="$sep"
+  while IFS= read -r line; do
+    # Split each line by separator
+    echo "$line" | tr "$sep" '\n'
+  done
+}
+
+fn_prefix() {
+  local p="$1"
+  while IFS= read -r line; do
+    printf '%s%s\n' "$p" "$line"
+  done
+}
+
+fn_suffix() {
+  local s="$1"
+  while IFS= read -r line; do
+    printf '%s%s\n' "$line" "$s"
+  done
+}
+
+# ──────────────────────────────────────────────
+# Parse arguments
+# ──────────────────────────────────────────────
+
+copy=true
+copy_html=false
+transforms=()
+use_html_source=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --trim)        transforms+=("trim") ;;
+    --rtrim)       transforms+=("rtrim") ;;
+    --strip-blank) transforms+=("strip_blank") ;;
+    --collapse)    transforms+=("collapse") ;;
+    --dedup)       transforms+=("dedup") ;;
+    --lower)       transforms+=("lower") ;;
+    --upper)       transforms+=("upper") ;;
+    --title)       transforms+=("title") ;;
+    --sentence)    transforms+=("sentence") ;;
+    --sort)        transforms+=("sort") ;;
+    --sort-r)      transforms+=("sort_r") ;;
+    --unformat)    transforms+=("unformat") ;;
+    --md)          transforms+=("md"); use_html_source=true ;;
+    --csv2md)      transforms+=("csv2md") ;;
+    --claude)      transforms+=("claude") ;;
+    --boxtable)    transforms+=("boxtable") ;;
+    --md2csv)      transforms+=("md2csv") ;;
+    --toexcel)     transforms+=("toexcel") ;;
+    --md2html)     transforms+=("md2html"); copy_html=true ;;
+    --csv2html)    transforms+=("csv2html"); copy_html=true ;;
+    --tohtml)      transforms+=("tohtml"); copy_html=true ;;
+    --rich)        copy_html=true ;;
+    --unwrap)      transforms+=("unwrap") ;;
+    --join)        shift; transforms+=("join:$1") ;;
+    --split)       shift; transforms+=("split:$1") ;;
+    --prefix)      shift; transforms+=("prefix:$1") ;;
+    --suffix)      shift; transforms+=("suffix:$1") ;;
+    --wrap)
+      shift; transforms+=("prefix:$1")
+      shift; transforms+=("suffix:$1")
+      ;;
+    --no-copy)     copy=false ;;
+    -h|--help)     usage; exit 0 ;;
+    *)
+      echo "[clip] Unknown option: $1" >&2
+      echo "       Run 'clip --help' for usage" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if [[ ${#transforms[@]} -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+# ──────────────────────────────────────────────
+# Read input
+# ──────────────────────────────────────────────
+
+if [[ -t 0 ]]; then
+  # No stdin pipe — read from clipboard
+  result=$(pbpaste)
+else
+  # Stdin piped in
+  result=$(cat)
+fi
+
+# ──────────────────────────────────────────────
+# Apply transforms in order
+# ──────────────────────────────────────────────
+
+applied=()
+for t in "${transforms[@]}"; do
+  case "$t" in
+    join:*)   result=$(printf '%s\n' "$result" | fn_join "${t#join:}"); applied+=("join") ;;
+    split:*)  result=$(printf '%s\n' "$result" | fn_split "${t#split:}"); applied+=("split") ;;
+    prefix:*) result=$(printf '%s\n' "$result" | fn_prefix "${t#prefix:}"); applied+=("prefix") ;;
+    suffix:*) result=$(printf '%s\n' "$result" | fn_suffix "${t#suffix:}"); applied+=("suffix") ;;
+    md)       result=$(printf '%s\n' "$result" | fn_md); applied+=("md") ;;
+    *)        result=$(printf '%s\n' "$result" | "fn_$t"); applied+=("$t") ;;
+  esac
+done
+
+# ──────────────────────────────────────────────
+# Output
+# ──────────────────────────────────────────────
+
+# Build description of what was done
+desc=$(IFS=" → "; echo "${applied[*]}")
+
+if $copy; then
+  if $copy_html; then
+    # Copy as rich HTML so Apple Notes / rich-text apps render the table
+    tmpfile=$(mktemp)
+    printf '%s' "<meta charset=\"utf-8\">$result" > "$tmpfile"
+    osascript -l JavaScript -e "
+      ObjC.import('AppKit');
+      ObjC.import('Foundation');
+      var path = '$tmpfile';
+      var html = \$.NSString.stringWithContentsOfFileEncodingError(path, \$.NSUTF8StringEncoding, null);
+      var pb = \$.NSPasteboard.generalPasteboard;
+      pb.clearContents;
+      pb.setStringForType(html, \$('public.html'));
+      pb.setStringForType(html, \$('public.utf8-plain-text'));
+    " >/dev/null 2>&1
+    rm -f "$tmpfile"
+    echo "[clip] ${desc} → copied (HTML)" >&2
+  else
+    printf '%s' "$result" | pbcopy
+    echo "[clip] ${desc} → copied" >&2
+  fi
+else
+  printf '%s\n' "$result"
+fi
