@@ -1,0 +1,18 @@
+#!/bin/bash
+# Post-install script for clip-utility
+# Copies binaries to /usr/local/bin
+
+INSTALL_DIR="/usr/local/bin"
+SRC_DIR="$(dirname "$0")/../Resources"
+
+mkdir -p "$INSTALL_DIR"
+
+cp "$SRC_DIR/clip" "$INSTALL_DIR/clip"
+cp "$SRC_DIR/clip-tui" "$INSTALL_DIR/clip-tui"
+cp "$SRC_DIR/clip-menu" "$INSTALL_DIR/clip-menu"
+
+chmod +x "$INSTALL_DIR/clip"
+chmod +x "$INSTALL_DIR/clip-tui"
+chmod +x "$INSTALL_DIR/clip-menu"
+
+exit 0
