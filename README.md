@@ -1,26 +1,38 @@
 # clip
 
-Composable clipboard transformer for macOS. Convert between rich text, markdown, HTML, CSV, and terminal output with a single command.
+Ever copy something from one app and paste it into another, only to get mangled formatting, broken tables, or a wall of raw HTML? **clip** fixes that.
 
-Copy from Claude Code and paste into Gmail with proper formatting. Copy from Excel and paste a clean markdown table into GitHub. Convert rich email threads into clean markdown for your notes.
-
-Instead of manually cleaning up formatting every time you move text between apps, `clip` chains transforms together:
-
-```bash
-clip --claude --unwrap --tohtml    # Claude terminal → Gmail/Word/Notes
-clip --md --rtrim --strip-blank    # Rich text → clean markdown
-clip --claude --unwrap --toexcel   # Claude terminal → Excel
-```
-
-Includes an interactive TUI (`clip-tui`) with live preview, and a macOS dialog interface (`clip-menu`) for use with Apple Shortcuts.
-
-### Interactive TUI with live preview
+It sits between your clipboard and your destination — transforming the content so it pastes cleanly. Works with any app: Gmail, Apple Notes, Word, Excel, GitHub, Typora, terminal output, and more.
 
 ![clip-tui](assets/tui.png)
 
-### Result pasted into Typora
+### The problem
 
-![Rich paste result](assets/rich-paste.png)
+| You copied from... | You're pasting into... | What happens |
+|---|---|---|
+| Claude Code / terminal | Gmail or Word | Tables break, formatting lost |
+| Gmail or Word | GitHub or Typora | HTML tags everywhere |
+| Excel | Apple Notes | Table becomes one long line |
+| Any AI tool | Anywhere else | Smart quotes, weird dashes, broken wrapping |
+
+### The fix
+
+```bash
+clip --claude --unwrap --tohtml        # Terminal → Gmail/Word/Notes (with tables!)
+clip --md --rtrim --strip-blank        # Rich text → clean Markdown
+clip --tohtml                          # Markdown → formatted email
+clip --claude --unwrap --toexcel       # Terminal → Excel spreadsheet
+```
+
+Or use the interactive TUI with live preview — select transforms and see the result before applying:
+
+```bash
+clip-tui
+```
+
+![Result pasted into Typora](assets/rich-paste.png)
+
+Also includes `clip-menu`, a native macOS dialog interface you can trigger from Apple Shortcuts with a keyboard shortcut.
 
 ## Install
 
