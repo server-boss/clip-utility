@@ -85,7 +85,7 @@ clipboard_read_html() {
       fi
       ;;
     wsl)
-      powershell.exe -NoProfile -Command "Get-Clipboard -Format Html" 2>/dev/null | sed 's/\r$//' || true
+      powershell.exe -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Format Html" 2>/dev/null | sed 's/\r$//' || true
       ;;
   esac
 }
@@ -125,7 +125,7 @@ clipboard_write_html() {
       ;;
     wsl)
       # Fallback: copy as plain text (Windows HTML clipboard requires CF_HTML format)
-      printf '%s' "$html" | clip.exe
+      printf '%s' "$html" | powershell.exe -NoProfile -Command 'Set-Clipboard -Value ($input -join [char]10)'
       ;;
   esac
 }
@@ -459,7 +459,11 @@ fn_unwrap() {
 
 fn_md() {
   if ! command -v pandoc &>/dev/null; then
-    echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    if [[ "$CLIP_PLATFORM" == "macos" ]]; then
+      echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    else
+      echo "[clip] pandoc not found — install with: sudo apt install pandoc" >&2
+    fi
     cat
     return 1
   fi
@@ -553,7 +557,11 @@ fn_md2csv() {
 
 fn_tohtml() {
   if ! command -v pandoc &>/dev/null; then
-    echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    if [[ "$CLIP_PLATFORM" == "macos" ]]; then
+      echo "[clip] pandoc not found — install with: brew install pandoc" >&2
+    else
+      echo "[clip] pandoc not found — install with: sudo apt install pandoc" >&2
+    fi
     cat
     return 1
   fi

@@ -86,6 +86,21 @@ label_to_flags() {
 # Build the preview script
 # ──────────────────────────────────────────────
 
+# Cache clipboard to temp file (avoids repeated powershell.exe calls on WSL)
+CLIP_TMP="${TMPDIR:-/tmp}/.clip-tui-input-$$"
+REFRESH_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-refresh-$$"
+clip_paste > "$CLIP_TMP"
+trap 'rm -f "$CLIP_TMP" "$PREVIEW_SCRIPT" "$REFRESH_SCRIPT"' EXIT
+
+# Refresh script — re-reads clipboard into the cache file
+cat > "$REFRESH_SCRIPT" << REFRESH_EOF
+#!/usr/bin/env bash
+$(declare -f _is_wsl)
+$(declare -f clip_paste)
+clip_paste > "$CLIP_TMP"
+REFRESH_EOF
+chmod +x "$REFRESH_SCRIPT"
+
 PREVIEW_SCRIPT="${TMPDIR:-/tmp}/.clip-tui-preview-$$"
 cat > "$PREVIEW_SCRIPT" << 'PREVIEW_EOF'
 #!/usr/bin/env bash
@@ -94,20 +109,8 @@ export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 CLIP="clip"
-
-_is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
-
-clip_paste() {
-  case "$(uname -s)" in
-    Darwin)  pbpaste ;;
-    Linux)
-      if _is_wsl; then powershell.exe -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard" 2>/dev/null | sed 's/\r$//'
-      elif command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
-      elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
-      elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
-      fi ;;
-  esac
-}
+CLIP_TMP="$1"
+shift
 
 label_to_flags() {
   case "$1" in
@@ -160,12 +163,12 @@ if [ -z "$flags" ]; then
   r='\033[0m'
   echo -e "  ${d}── Clipboard contents (raw) ──${r}"
   echo ""
-  clip_paste | head -50
+  cat "$CLIP_TMP" | head -50
 else
   echo "── clip$flags ──"
   echo ""
   # shellcheck disable=SC2086
-  clip_paste | "$CLIP" $flags --no-copy 2>/dev/null | head -50
+  cat "$CLIP_TMP" | "$CLIP" $flags --no-copy 2>/dev/null | head -50
 fi
 PREVIEW_EOF
 chmod +x "$PREVIEW_SCRIPT"
@@ -224,7 +227,7 @@ fzf_args=(
   --cycle
   --reverse
   --height=100%
-  --preview="$PREVIEW_SCRIPT {+f}"
+  --preview="$PREVIEW_SCRIPT $CLIP_TMP {+f}"
   --preview-window=right:55%:wrap
   --ansi
   --prompt="transforms> "
@@ -258,8 +261,8 @@ if [[ "$fzf_minor" -ge 46 ]] 2>/dev/null; then
     --border-label=" ✂ "
     --border-label-pos=3
     --color='label:#8b5cf6'
-    --bind "del:execute-silent(echo -n | clip --trim)+reload(echo \"$items\")+clear-selection"
-    --bind "r:refresh-preview"
+    --bind "del:execute-silent(: > $CLIP_TMP)+reload(echo \"$items\")+clear-selection"
+    --bind "r:execute-silent($REFRESH_SCRIPT)+refresh-preview"
   )
 fi
 
@@ -283,4 +286,4 @@ if [ -z "$flags" ]; then
 fi
 
 # shellcheck disable=SC2086
-"$CLIP" $flags
+cat "$CLIP_TMP" | "$CLIP" $flags
