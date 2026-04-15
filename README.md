@@ -10,21 +10,22 @@ I got tired of copying text from one app to another, only for it to have butcher
 clip-tui
 ```
 
-src="assets/clip-tui-before+after.png"
+![clip-tui before and after](assets/clip-tui-before+after.png)
 
-### #2 Open a native MacOS menu from the terminal, or assign it to a keyboard shortcut usinh a Apple "Shortcut" — for quick access to presets without a live-preview
+### #2 Open a native MacOS menu from the terminal, or assign it to a keyboard shortcut using an Apple "Shortcut" — for quick access to presets without a live-preview
 
 ```bash
 clip-menu
 ```
 
 <p>
-<img src="assets/clip-menu.png" width="49%" alt="Main pop-up menu">
-<img src="assets/clip-menu-format.png" width="49%" alt="Text options">
-<img src="assets/clip-menu-tables.png" width="49%" alt="Table options">
+<img src="assets/clip-menu.png" width="30%" alt="Main pop-up menu">
+<img src="assets/clip-menu-format.png" width="30%" alt="Text options">
+<img src="assets/clip-menu-tables.png" width="30%" alt="Table options">
 </p>
-
-![Apple "Shortcut" Setup](assets/shortcut-setup-ex.png) 
+<p>
+<img src="assets/shortcut-setup-ex.png" width="50%"> 
+<p>
 
 ### #3 Or use the CLI directly, to customize which arguments to apply in order that they are passed:
 
@@ -146,6 +147,7 @@ Assign a keyboard shortcut (e.g. `Option+Shift+C`) under the shortcut's options.
 
 ## Security
 
+Clip runs entirely on your machine — no data is sent to any server or third party. All transforms are applied locally using standard Unix tools (`awk`, `sed`, `pandoc`). Clipboard content never leaves your system. The source code is short, readable bash — audit it yourself in minutes.
 
 ## License
 

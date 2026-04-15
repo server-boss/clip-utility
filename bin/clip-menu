@@ -66,13 +66,25 @@ case "$category" in
     ;;
 
   "🔧 Open TUI (full preview)")
-    # Open clip-tui in a new terminal window
-    osascript -e '
-      tell application "Terminal"
-        activate
-        do script "clip-tui"
-      end tell
-    ' 2>/dev/null
+    # Open clip-tui in the user's preferred terminal
+    if pgrep -q iTerm2; then
+      osascript -e '
+        tell application "iTerm"
+          activate
+          tell current window
+            create tab with default profile
+            tell current session to write text "clip-tui"
+          end tell
+        end tell
+      ' 2>/dev/null
+    else
+      osascript -e '
+        tell application "Terminal"
+          activate
+          do script "clip-tui"
+        end tell
+      ' 2>/dev/null
+    fi
     exit 0
     ;;
 esac
