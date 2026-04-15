@@ -57,6 +57,9 @@ After restarting your computer, open **PowerShell** and run `wsl` to launch Ubun
 Then install clip inside WSL:
 
 ```bash
+# Fix locale (common on fresh WSL installs)
+sudo locale-gen en_US.UTF-8
+
 # Install dependencies
 sudo apt update && sudo apt install -y fzf pandoc
 
