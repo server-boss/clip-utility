@@ -49,9 +49,10 @@ Requires Windows Subsystem for Linux. If you don't have WSL installed:
 
 ```powershell
 # Run in PowerShell as Administrator
-wsl --install
-# Restart your computer, then open "Ubuntu" from the Start menu to finish setup
+wsl --install -d Ubuntu
 ```
+
+After restarting your computer, open **PowerShell** and run `wsl` to launch Ubuntu. It will prompt you to create a username and password on first run. Once you see a `$` prompt, you're in Linux and ready to install clip.
 
 Then install clip inside WSL:
 
