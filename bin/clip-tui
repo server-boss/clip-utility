@@ -18,7 +18,7 @@ clip_paste() {
   case "$(uname -s)" in
     Darwin)  pbpaste ;;
     Linux)
-      if _is_wsl; then powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//'
+      if _is_wsl; then powershell.exe -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard" 2>/dev/null | sed 's/\r$//'
       elif command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
       elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
       elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
@@ -101,7 +101,7 @@ clip_paste() {
   case "$(uname -s)" in
     Darwin)  pbpaste ;;
     Linux)
-      if _is_wsl; then powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//'
+      if _is_wsl; then powershell.exe -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard" 2>/dev/null | sed 's/\r$//'
       elif command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
       elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
       elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null

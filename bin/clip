@@ -42,7 +42,7 @@ clipboard_read() {
         return 1
       fi
       ;;
-    wsl)     powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | sed 's/\r$//' ;;
+    wsl)     powershell.exe -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard" 2>/dev/null | sed 's/\r$//' ;;
     *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
   esac
 }
@@ -62,7 +62,7 @@ clipboard_write() {
         return 1
       fi
       ;;
-    wsl)     clip.exe ;;
+    wsl)     powershell.exe -NoProfile -Command "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value (\$input -join \\\"`n\\\")" ;;
     *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
   esac
 }
