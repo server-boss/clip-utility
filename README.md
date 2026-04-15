@@ -24,10 +24,16 @@ Includes an interactive TUI (`clip-tui`) with live preview, and a macOS dialog i
 
 ## Install
 
+### Homebrew (recommended)
+
 ```bash
 brew tap server-boss/clip-utility
 brew install clip-utility
 ```
+
+### DMG Installer
+
+Download `clip-utility-1.0.0.dmg` from [Releases](https://github.com/server-boss/clip-utility/releases). Open the DMG, then **right-click** `clip-utility.pkg` and choose **Open** (required for unsigned packages). Installs CLI tools to `/usr/local/bin` and Clip Menu.app to `/Applications`.
 
 ### Dependencies
 
