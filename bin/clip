@@ -6,6 +6,127 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 # ──────────────────────────────────────────────
 # clip — composable clipboard text transformer
 # ──────────────────────────────────────────────
+
+# ──────────────────────────────────────────────
+# Platform abstraction
+# ──────────────────────────────────────────────
+
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin)  CLIP_PLATFORM="macos" ;;
+    Linux)   CLIP_PLATFORM="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) CLIP_PLATFORM="windows" ;;
+    *)       CLIP_PLATFORM="unknown" ;;
+  esac
+}
+
+clipboard_read() {
+  case "$CLIP_PLATFORM" in
+    macos)   pbpaste ;;
+    linux)
+      if command -v wl-paste &>/dev/null; then
+        wl-paste 2>/dev/null
+      elif command -v xclip &>/dev/null; then
+        xclip -selection clipboard -o 2>/dev/null
+      elif command -v xsel &>/dev/null; then
+        xsel --clipboard --output 2>/dev/null
+      else
+        echo "[clip] No clipboard tool found. Install xclip, xsel, or wl-clipboard." >&2
+        return 1
+      fi
+      ;;
+    windows) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
+    *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
+  esac
+}
+
+clipboard_write() {
+  case "$CLIP_PLATFORM" in
+    macos)   pbcopy ;;
+    linux)
+      if command -v wl-copy &>/dev/null; then
+        wl-copy
+      elif command -v xclip &>/dev/null; then
+        xclip -selection clipboard -i
+      elif command -v xsel &>/dev/null; then
+        xsel --clipboard --input
+      else
+        echo "[clip] No clipboard tool found. Install xclip, xsel, or wl-clipboard." >&2
+        return 1
+      fi
+      ;;
+    windows) powershell.exe -Command "Set-Clipboard -Value (\$input | Out-String)" 2>/dev/null ;;
+    *)       echo "[clip] Unsupported platform" >&2; return 1 ;;
+  esac
+}
+
+clipboard_read_html() {
+  case "$CLIP_PLATFORM" in
+    macos)
+      osascript -l JavaScript -e '
+        ObjC.import("AppKit");
+        var pb = $.NSPasteboard.generalPasteboard;
+        var html = pb.stringForType($.NSPasteboardTypeHTML);
+        html ? html.js : "";
+      ' 2>/dev/null || true
+      ;;
+    linux)
+      if command -v xclip &>/dev/null; then
+        xclip -selection clipboard -t text/html -o 2>/dev/null || true
+      elif command -v wl-paste &>/dev/null; then
+        wl-paste --type text/html 2>/dev/null || true
+      fi
+      ;;
+    windows)
+      powershell.exe -Command "Get-Clipboard -Format Html" 2>/dev/null || true
+      ;;
+  esac
+}
+
+clipboard_write_html() {
+  # Reads HTML from stdin, writes to clipboard as rich HTML + plain text fallback
+  local html
+  html=$(cat)
+
+  case "$CLIP_PLATFORM" in
+    macos)
+      local tmpfile
+      tmpfile=$(mktemp)
+      printf '%s' "<meta charset=\"utf-8\">$html" > "$tmpfile"
+      osascript -l JavaScript -e "
+        ObjC.import('AppKit');
+        ObjC.import('Foundation');
+        var path = '$tmpfile';
+        var html = \$.NSString.stringWithContentsOfFileEncodingError(path, \$.NSUTF8StringEncoding, null);
+        var pb = \$.NSPasteboard.generalPasteboard;
+        pb.clearContents;
+        pb.setStringForType(html, \$('public.html'));
+        pb.setStringForType(html, \$('public.utf8-plain-text'));
+      " >/dev/null 2>&1
+      rm -f "$tmpfile"
+      ;;
+    linux)
+      if command -v xclip &>/dev/null; then
+        # Write HTML type and plain text type
+        printf '%s' "$html" | xclip -selection clipboard -t text/html -i 2>/dev/null
+      elif command -v wl-copy &>/dev/null; then
+        printf '%s' "$html" | wl-copy --type text/html 2>/dev/null
+      else
+        # Fallback: copy as plain text
+        printf '%s' "$html" | clipboard_write
+      fi
+      ;;
+    windows)
+      # Windows CF_HTML requires a special header format
+      local header
+      header=$(printf 'Version:0.9\r\nStartHTML:00000097\r\nEndHTML:%08d\r\nStartFragment:00000097\r\nEndFragment:%08d\r\n' \
+        $((97 + ${#html})) $((97 + ${#html})))
+      printf '%s%s' "$header" "$html" | powershell.exe -Command "Set-Clipboard -Value (\$input | Out-String) -AsHtml" 2>/dev/null
+      ;;
+  esac
+}
+
+detect_platform
 # Usage:
 #   clip --trim --dedup --lower          Chain transforms, result → clipboard
 #   clip --md --trim                     HTML clipboard → markdown → trim
@@ -340,12 +461,7 @@ fn_md() {
   fi
 
   local html
-  html=$(osascript -l JavaScript -e '
-    ObjC.import("AppKit");
-    var pb = $.NSPasteboard.generalPasteboard;
-    var html = pb.stringForType($.NSPasteboardTypeHTML);
-    html ? html.js : "";
-  ' 2>/dev/null || true)
+  html=$(clipboard_read_html)
 
   if [[ -z "$html" ]]; then
     echo "[clip] No HTML on clipboard, passing through as plain text" >&2
@@ -696,7 +812,7 @@ fi
 
 if [[ -t 0 ]]; then
   # No stdin pipe — read from clipboard
-  result=$(pbpaste)
+  result=$(clipboard_read)
 else
   # Stdin piped in
   result=$(cat)
@@ -727,23 +843,10 @@ desc=$(IFS=" → "; echo "${applied[*]}")
 
 if $copy; then
   if $copy_html; then
-    # Copy as rich HTML so Apple Notes / rich-text apps render the table
-    tmpfile=$(mktemp)
-    printf '%s' "<meta charset=\"utf-8\">$result" > "$tmpfile"
-    osascript -l JavaScript -e "
-      ObjC.import('AppKit');
-      ObjC.import('Foundation');
-      var path = '$tmpfile';
-      var html = \$.NSString.stringWithContentsOfFileEncodingError(path, \$.NSUTF8StringEncoding, null);
-      var pb = \$.NSPasteboard.generalPasteboard;
-      pb.clearContents;
-      pb.setStringForType(html, \$('public.html'));
-      pb.setStringForType(html, \$('public.utf8-plain-text'));
-    " >/dev/null 2>&1
-    rm -f "$tmpfile"
+    printf '%s' "$result" | clipboard_write_html
     echo "[clip] ${desc} → copied (HTML)" >&2
   else
-    printf '%s' "$result" | pbcopy
+    printf '%s' "$result" | clipboard_write
     echo "[clip] ${desc} → copied" >&2
   fi
 else

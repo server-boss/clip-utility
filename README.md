@@ -24,17 +24,34 @@ Includes an interactive TUI (`clip-tui`) with live preview, and a macOS dialog i
 
 ## Install
 
-### Homebrew (recommended)
+### macOS (Homebrew)
 
 ```bash
 brew tap server-boss/clip-utility
 brew install clip-utility
 ```
 
+### Linux
+
+```bash
+# Clone and install to PATH
+git clone https://github.com/server-boss/clip-utility.git
+sudo cp clip-utility/bin/clip clip-utility/bin/clip-tui /usr/local/bin/
+
+# Install clipboard tool (pick one)
+sudo apt install xclip        # X11
+sudo apt install wl-clipboard  # Wayland
+```
+
+### Windows (WSL)
+
+Install inside WSL using the Linux instructions above. `clip` auto-detects WSL and uses PowerShell for clipboard access.
+
 ### Dependencies
 
-- **pandoc** (optional) — required for `--md` and `--tohtml` transforms. Install with `brew install pandoc`.
-- **fzf** (optional) — required for `clip-tui`. Install with `brew install fzf`.
+- **pandoc** (optional) — required for `--md` and `--tohtml` transforms
+- **fzf** (optional) — required for `clip-tui`
+- **xclip** or **wl-clipboard** (Linux only) — required for clipboard access
 
 ## Usage
 

@@ -11,6 +11,30 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 CLIP="clip"
 
+# ── Platform clipboard helpers ──
+clip_paste() {
+  case "$(uname -s)" in
+    Darwin)  pbpaste ;;
+    Linux)
+      if command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
+      elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
+      elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
+      fi ;;
+    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
+  esac
+}
+
+clip_clear() {
+  case "$(uname -s)" in
+    Darwin)  pbcopy < /dev/null ;;
+    Linux)
+      if command -v xclip &>/dev/null; then echo -n | xclip -selection clipboard -i 2>/dev/null
+      elif command -v wl-copy &>/dev/null; then wl-copy --clear 2>/dev/null
+      fi ;;
+    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Set-Clipboard -Value ''" 2>/dev/null ;;
+  esac
+}
+
 # ──────────────────────────────────────────────
 # Label → flags mapping
 # ──────────────────────────────────────────────
@@ -69,6 +93,18 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 CLIP="clip"
 
+clip_paste() {
+  case "$(uname -s)" in
+    Darwin)  pbpaste ;;
+    Linux)
+      if command -v wl-paste &>/dev/null; then wl-paste 2>/dev/null
+      elif command -v xclip &>/dev/null; then xclip -selection clipboard -o 2>/dev/null
+      elif command -v xsel &>/dev/null; then xsel --clipboard --output 2>/dev/null
+      fi ;;
+    MINGW*|MSYS*|CYGWIN*) powershell.exe -Command "Get-Clipboard" 2>/dev/null ;;
+  esac
+}
+
 label_to_flags() {
   case "$1" in
     "Claude → Markdown"*)                 echo "--claude --unwrap" ;;
@@ -120,12 +156,12 @@ if [ -z "$flags" ]; then
   r='\033[0m'
   echo -e "  ${d}── Clipboard contents (raw) ──${r}"
   echo ""
-  pbpaste | head -50
+  clip_paste | head -50
 else
   echo "── clip$flags ──"
   echo ""
   # shellcheck disable=SC2086
-  pbpaste | "$CLIP" $flags --no-copy 2>/dev/null | head -50
+  clip_paste | "$CLIP" $flags --no-copy 2>/dev/null | head -50
 fi
 PREVIEW_EOF
 chmod +x "$PREVIEW_SCRIPT"
@@ -187,8 +223,8 @@ selected=$(echo "$items" | fzf \
   --preview="$PREVIEW_SCRIPT {+f}" \
   --preview-window=right:55%:wrap \
   --ansi \
-  --bind "del:execute-silent(pbcopy < /dev/null)+reload(echo \"$items\")+clear-selection" \
-  --bind "r:execute-silent(pbpaste > $CLIP_TMP)+refresh-preview" \
+  --bind "del:execute-silent(echo -n | clip --trim)+reload(echo \"$items\")+clear-selection" \
+  --bind "r:refresh-preview" \
   --color='border:#8b5cf6,label:#8b5cf6,header:#6b7280' \
   --prompt="transforms> " \
   --marker="✓" \
