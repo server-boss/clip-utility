@@ -45,7 +45,41 @@ sudo apt install wl-clipboard  # Wayland
 
 ### Windows (WSL)
 
-Install inside WSL using the Linux instructions above. `clip` auto-detects WSL and uses PowerShell for clipboard access.
+Requires Windows Subsystem for Linux. If you don't have WSL installed:
+
+```powershell
+# Run in PowerShell as Administrator
+wsl --install
+# Restart your computer, then open "Ubuntu" from the Start menu to finish setup
+```
+
+Then install clip inside WSL:
+
+```bash
+# Install dependencies
+sudo apt update && sudo apt install -y fzf pandoc
+
+# Clone and install
+git clone https://github.com/server-boss/clip-utility.git
+sudo cp clip-utility/bin/clip clip-utility/bin/clip-tui /usr/local/bin/
+```
+
+`clip` auto-detects WSL and uses PowerShell for clipboard access — no extra clipboard tools needed.
+
+#### Keyboard shortcut
+
+To launch `clip-tui` with a hotkey, create a desktop shortcut:
+
+1. Right-click desktop → **New** → **Shortcut**
+2. Set target to: `wsl.exe -e bash -lc clip-tui`
+3. Click **Next**, name it "Clip TUI", click **Finish**
+4. Right-click the shortcut → **Properties** → **Shortcut key** → press your desired key combo (e.g. `Ctrl+Alt+C`)
+
+Or use [AutoHotkey](https://www.autohotkey.com/) for a global hotkey:
+
+```ahk
+^!c::Run, wt.exe wsl.exe -e bash -lc clip-tui   ; Ctrl+Alt+C opens in Windows Terminal
+```
 
 ### Dependencies
 
