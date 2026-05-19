@@ -801,12 +801,16 @@ fi
 # Read input
 # ──────────────────────────────────────────────
 
-if [[ -t 0 ]]; then
-  # No stdin pipe — read from clipboard
-  result=$(clipboard_read)
-else
-  # Stdin piped in
+if [[ -p /dev/stdin || -f /dev/stdin ]]; then
+  # Real input on stdin — a pipe (echo x | clip) or a redirected file
+  # (clip < file). Use it.
   result=$(cat)
+else
+  # No real stdin: an interactive terminal, or a non-TTY launcher such
+  # as Apple Shortcuts / Automator / cron where stdin is /dev/null.
+  # In every one of these cases the user means "transform the
+  # clipboard", so read it rather than an empty stdin.
+  result=$(clipboard_read)
 fi
 
 # ──────────────────────────────────────────────
